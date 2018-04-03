@@ -1,6 +1,6 @@
 var Gute;
 (function (Gute) {
-    var PAGE_SIZE = 1024;
+    var PAGE_SIZE = 0x10000;
     var TOUCH_CLICK_DIST_2 = 8 * 8;
     var BOOKMARK_LAST = 'last';
 
@@ -211,8 +211,8 @@ var Gute;
         };
 
         Reader.prototype._binarySearch = function (min, max, fn) {
-            var trialSize = 0;
-            var lastResult = false;
+            var trialSize;
+            var lastResult;
             while (true) {
                 if (min >= max) {
                     break;
@@ -280,7 +280,7 @@ var Gute;
         };
 
         Reader.prototype._error = function () {
-            window.location.replace('/s/examples.html');
+            //      window.location.replace('/s/examples.html');
         };
 
         Reader.prototype._stringTogether = function (firstPage, pageCount) {
@@ -311,9 +311,10 @@ var Gute;
                         return;
                     }
 
-                    var bookSummary = JSON.parse(xhr.responseText);
+                    var bookInfo = JSON.parse(xhr.responseText);
                     _this._bookId = bookId;
-                    _this._chunkCount = bookSummary['chunkCount'];
+                    _this._contentType = bookInfo['contentType'];
+                    _this._chunkCount = bookInfo['chunkCount'];
                     _this._loadBookmark(BOOKMARK_LAST);
                 }
             };

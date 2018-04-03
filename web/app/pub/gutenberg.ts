@@ -1,6 +1,6 @@
 module Gute {
 
-  var PAGE_SIZE = 1024;
+  var PAGE_SIZE = 0x10000;
   var TOUCH_CLICK_DIST_2 = 8 * 8;
   var BOOKMARK_LAST = 'last';
 
@@ -10,6 +10,7 @@ module Gute {
 
   export class Reader {
     private _bookId: string;
+    private _contentType: string;
     private _chunkCount: number;
 
     private _position: number;
@@ -224,8 +225,8 @@ module Gute {
     }
 
     _binarySearch(min: number, max: number, fn: (number)=>boolean): number {
-      var trialSize = 0;
-      var lastResult = false;
+      var trialSize: number;
+      var lastResult: boolean;
       while (true) {
         if (min >= max) {
           break;
@@ -293,7 +294,7 @@ module Gute {
     }
 
     _error(): void {
-      window.location.replace('/s/examples.html');
+//      window.location.replace('/s/examples.html');
     }
 
     _stringTogether(firstPage: number, pageCount: number): string {
@@ -323,9 +324,10 @@ module Gute {
             return;
           }
 
-          var bookSummary = JSON.parse(xhr.responseText);
+          var bookInfo = JSON.parse(xhr.responseText);
           this._bookId = bookId;
-          this._chunkCount = bookSummary['chunkCount'];
+          this._contentType = bookInfo['contentType'];
+          this._chunkCount = bookInfo['chunkCount'];
           this._loadBookmark(BOOKMARK_LAST);
         }
       };

@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 	"encoding/json"
 	"strconv"
 	"appengine/urlfetch"
@@ -19,7 +17,7 @@ import (
 
 const (
 	INDEX_NAME   = "index.gob"
-	PAGE_SIZE    = 1024
+	CHUNK_SIZE   = 0x10000
 	MAX_WORD_LEN = 100
 	MAX_WORDS    = 100
 )
@@ -33,15 +31,14 @@ type IndexEntry struct {
 
 type Index map[string]IndexEntry
 
-type BookSummary struct {
+type BookInfo struct {
 	ContentType string
-	WordCount   int
 	ChunkCount  int
 }
 
 type Book struct {
-	BookSummary
-	Chunks []string
+  BookInfo
+	Raw  []byte
 }
 
 var cache map[string]*Book
@@ -60,86 +57,6 @@ func readFromGutenberg(ctx appengine.Context, bookPath string) ([]byte, error) {
 	}
 	defer rsp.Body.Close()
 	return ioutil.ReadAll(rsp.Body)
-}
-
-// Takes the raw book byte stream and processes it into a Book. Performs
-// all necessary mangling and formatting to make the client happy.
-func processBook(raw []byte, contentType string) *Book {
-	words := make([]string, PAGE_SIZE)
-	wordPos := 0
-	for {
-		wordCount := 0
-		raw, wordCount = processLine(raw, words[wordPos:])
-		wordPos += wordCount
-		if wordPos == PAGE_SIZE {
-			break
-		}
-	}
-
-	var chunkCount int = (len(words) / PAGE_SIZE) + 1
-
-	chunks := make([]string, chunkCount)
-	for i := 0; i < chunkCount; i++ {
-		start := i * PAGE_SIZE
-		end := (i + 1) * PAGE_SIZE
-		if end > len(words) {
-			end = len(words)
-		}
-		chunks[i] = strings.Join(words[start:end], " ")
-	}
-
-	return &Book{
-		BookSummary{
-			WordCount:   0, // TODO
-			ChunkCount:  chunkCount,
-			ContentType: contentType,
-		},
-		chunks,
-	}
-}
-
-func processLine(raw []byte, words []string) (newRaw []byte, wordCount int) {
-	runes := make([]rune, MAX_WORD_LEN)
-	pos := 0
-	bytePos := 0
-	wordCount = 0
-	max := len(raw)
-
-	makeWord := func() bool {
-		words[wordCount] = string(runes[0:bytePos])
-		bytePos = 0
-		wordCount++
-		return wordCount == len(words)
-	}
-
-	for {
-		if pos == max {
-			break
-		}
-
-		r, size := utf8.DecodeRune(raw)
-		pos++
-		bytePos += size
-		raw = raw[bytePos:]
-
-		if r == '\r' {
-			if r, size = utf8.DecodeRune(raw); r == '\n' {
-				pos++
-				bytePos += size
-				raw = raw[bytePos:]
-			}
-			makeWord()
-			break
-		}
-
-		runes[pos] = r
-		if unicode.IsSpace(r) {
-			if makeWord() {
-				break
-			}
-		}
-	}
-	return raw, wordCount
 }
 
 // Reads the given book from the local cache, if it's available. If not,
@@ -161,16 +78,23 @@ func readBook(ctx appengine.Context, bookPath string, contentType string) (*Book
 		}
 
 		// Process it into something palatable.
-		book := processBook(raw, contentType)
-
-		// Cache it locally.
-		outFile, err := os.OpenFile(relFile, os.O_CREATE|os.O_WRONLY, 0660)
-		if err != nil {
-			log.Printf("Error writing '%v': %v", relFile, err)
-			return nil, err
+		book := &Book {
+			BookInfo: BookInfo {
+				ContentType: contentType,
+				ChunkCount: len(raw) / CHUNK_SIZE,
+			},
+			Raw: raw,
 		}
-		gob.NewEncoder(outFile).Encode(&book)
-		outFile.Close()
+
+// Cache it locally.
+// TODO: Decide where to store this. GCS?
+//		outFile, err := os.OpenFile(relFile, os.O_CREATE|os.O_WRONLY, 0660)
+//		if err != nil {
+//			log.Printf("Error writing '%v': %v", relFile, err)
+//			return nil, err
+//		}
+//		gob.NewEncoder(outFile).Encode(&book)
+//		outFile.Close()
 
 		// And return it.
 		return book, nil
@@ -273,7 +197,7 @@ func PageHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", book.ContentType)
 
 	for i := firstPage; i < firstPage+pageCount; i++ {
-		w.Write([]byte(book.Chunks[i]))
+		w.Write(book.Raw[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE])
 		if i < firstPage+pageCount-1 {
 			w.Write([]byte("\u0000"))
 		}
@@ -293,7 +217,7 @@ func BookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serialized, err := json.Marshal(&book.BookSummary)
+	serialized, err := json.Marshal(&book.BookInfo)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
